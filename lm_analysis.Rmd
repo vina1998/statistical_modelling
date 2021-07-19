@@ -1,0 +1,117 @@
+---
+title: "stats_analyses_exploration_on_scooby_doo_dataset"
+author: "Vina"
+date: "18/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(tidymodels)
+scoobydoo <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-07-13/scoobydoo.csv')
+```
+
+Let's first visualize and identiify variables of interest in our dataset. Following this, we may have identified that "engagement" is our outcomes variabel of interest. So let's visualise the relationship between engagement and otehr variables within the scoobydoo dataset: 
+
+```{r,echo=False}
+
+head(scoobydoo)
+#season and engagement: 
+ggplot(scoobydoo,aes(season,engagement)) + geom_col() #it appears that engagement seems to be an odd variable, so lets uderstadn it more, by running: 
+is_numeric(scoobydoo$engagement) #apparently enegagemtn isnt numeric so lets change that; 
+scoobydoo_numeric_eng<-as.numeric(scoobydoo$engagement) %>% as_tibble() %>% rename(engagement = value) #lets do the same for variables of interest: 
+scoobydoo_factor_season<-as.factor(scoobydoo$season) %>% as_tibble() %>% rename(season = value) 
+scoobydoo_numeric<- cbind(scoobydoo_numeric_eng,scoobydoo_factor_season) %>% na.omit() %>% filter(season %in% c("1","2","3","4")) #we will only consider the contious seasons for now
+#try plotting again by first using the groupby fucntion: 
+seas_eng_jitplot<- scoobydoo_numeric %>% group_by(season) %>% ggplot(aes(season,engagement))+ geom_jitter() 
+seas_eng_histplot<-scoobydoo_numeric %>% group_by(season) %>% ggplot(aes(engagement)) + geom_histogram() + facet_wrap(~season)
+
+# we see here that engagement drops as seasons pass, lets see how we can model this with a regression in the following steps!
+
+```
+it is also important to notice that the season variable is discrete time series data, so we have to treat it as such when consdering the regression steps below: 
+
+```{r}
+#lets begin by identifying mean engagement per season: 
+scoobydoo_numeric %>% 
+  group_by(season) %>% 
+  summarise(mean_eng = mean(engagement)) %>% 
+  ungroup()
+
+#conducting the linear model: 
+engagement.lm <-  lm(engagement ~ season, data=scoobydoo_numeric)
+
+summary(engagement.lm)
+
+#plotting the linear model: 
+ggplot(scoobydoo_numeric,aes(season,engagement)) + geom_jitter() +
+  geom_abline(intercept = coef(engagement.lm)[1], linetype=2) +
+  geom_hline(yintercept = coef(engagement.lm)[1]+coef(engagement.lm)[2], linetype=3) +
+  geom_hline(yintercept = coef(engagement.lm)[1]+coef(engagement.lm)[3], linetype=4) +
+  geom_hline(yintercept = coef(engagement.lm)[1]+coef(engagement.lm)[4], linetype=5) 
+
+#regression model: 
+engagement.modelled <- engagement.lm %>% augment()
+
+
+
+```
+ What we have gathered from the analyses so far: 
+ -the mean engagement for season 1 is given by: 86.910 as reflectd by intercept[1] which is tretaed as the reference/baseline factor
+- the mean enagagement for season 2 is then intercept[1] + intercept[2], for season 3 is intercept[1] + intercept[3] and season 4 is intercept[1] + intercept[4]
+- in this way intercept[2], intercept[3] and intercept[4] are the slopes for season 2,3 and 4 respectively while season 1 has a slope of 0 considering that it is the baseline reference.Therefore, the slopes for season 2,3,4 demonstrate how much engagement deviates from the season 1.
+-the equation for our model is therefore, engagement= 86.910 + -3.427(season2) + -27.477(season 3) + -50.310 (season 4)
+
+```{r}
+
+#lets now try the same for a continuous predictor variable such as monster amount:
+scoobydoo_numeric_imdb<-as.numeric(scoobydoo$imdb) %>% as_tibble() %>% rename(imdb = value) 
+
+scoobydoo_numeric<- cbind(scoobydoo_numeric_eng,scoobydoo_factor_season,scoobydoo_numeric_imdb) %>% na.omit() %>% filter(season %in% c("1","2","3","4")) %>% na.omit()
+
+imdb_engagement.lm <- lm(engagement~imdb, data=scoobydoo_numeric)
+summary(imdb_engagement.lm)
+
+
+#lets model the regression line in two ways: 
+
+scoobydoo_numeric %>% 
+  ggplot(aes(x=imdb,y=engagement)) +
+  geom_point() +
+  geom_abline(intercept=coef(imdb_engagement.lm)[1],slope=coef(imdb_engagement.lm)[2])
+
+imdb_engagement.modelled<-imdb_engagement.lm%>%augment()
+ggplot(imdb_engagement.modelled,aes(imdb,engagement)) + geom_smooth(method = lm, se= FALSE, colour= "lightgrey") + geom_point(aes(colour= .resid, size= abs(.resid))) + scale_color_gradient2() + geom_segment(aes(xend=imdb, yend= .fitted), alpha=0.3) 
+```
+ What we have gathered from the analyses so far: 
+-Firstly, it seems that as imdb increases, so does engagement.
+-more specifically this increase takes the form of 75.919 for every unit of increment in imdb -also, when imdb is 0, the intercept is -476.126
+-it also appears that as imdb increases, engagement also deviates/varies greatly, therefore our regression line may be more accurate for predictionbs of engagement corresponding to lower imdbs. 
+
+```{r}
+#now lets put it all together!
+
+ggplot(scoobydoo_numeric,aes(imdb,engagement)) + geom_jitter(aes(colour=season))
+
+imdb_season_engagement.lm <- lm(engagement~imdb+season, data=scoobydoo_numeric)
+
+summary(imdb_season_engagement.lm)
+
+imdb_season_engagement.modelled<-imdb_season_engagement.lm%>%augment()
+ggplot(imdb_season_engagement.modelled,aes(imdb,engagement)) + geom_smooth(method = lm, se= FALSE, colour= "lightgrey") + geom_point(aes(colour= .resid, size= abs(.resid))) + scale_color_gradient2() + geom_segment(aes(xend=imdb, yend= .fitted), alpha=0.3) + facet_wrap(~season) 
+
+```
+What have we gathered so far: 
+engagement= -470.3668 + 75.5177(imdb) + -0.8755(season 2) + -21.6048(season 3) + -9.5741(season 4)
+- here we are then saying that for every increment in imdb unit, the change in engagement varies depending on the season 
+-Essentially we're  saying that our data is broken down into 4 season groups, and we want to model our data as having the same slope governing how engagement changes with imdb, but potentially different intercepts. SO FAR WE HAVE ONLY FOUND THE RANODM INTERCEPTS, WE CAN TAKE THIS A STEP FURTHER BY FINDING THE RANDOM SLOPES WHICH WILL IVOLVE AN ADDTIONAL PAARAMETER INVOLVING INTERACTION BETWEEN SEASON AND IMDB. so far we have "forced" one lope to fit the data of all four seasons. Good website: "https://www.andrew.cmu.edu/user/achoulde/94842/lectures/lecture10/lecture10-94842.html"
+
+
+
+```{r}
+test.lm <- lm(engagement~imdb+season +imdb*season, data=scoobydoo_numeric)
+summary(test.lm)
+anova(test.lm, imdb_season_engagement.lm)
+
+```
+

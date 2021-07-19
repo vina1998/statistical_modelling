@@ -1,0 +1,71 @@
+---
+title: "lmer_specific_analyses"
+author: "Vina"
+date: "19/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(broom.mixed)
+library(tidyverse)
+library(tidymodels)
+library(janitor)
+library(lme4)
+library(purrr)
+```
+
+lets explore and visualize the muscle dataset 
+```{r}
+head(muscle)
+ggplot(muscle,aes(Conc,Length, colour=Strip)) + geom_jitter()
+```
+lets begin by plotting one regression line per "heart strip tissue"
+
+```{r}
+
+#if we treat each data set as independent, one regression for all, ignoring repeated measures: 
+muscle.lm<- lm(Length~Conc,muscle)
+summary(muscle.lm)
+
+muscle.lm.modelled<-muscle.lm %>% augment() 
+ggplot(muscle.lm.modelled,aes(Conc,Length)) + geom_jitter() + geom_line(aes(y=.fitted))  
+
+
+```
+What we leanr from the above summary ouput is that for every unit of conc increase, the output length changes by 5.4030. However we know that heart tissue strip is likely to be involved in length as well. Therefore, wen can try building an lm model that factors for strip:
+
+```{r}
+muscle_nested <- muscle %>% group_by(Strip) %>% nest() %>% ungroup()
+muscle_nested #creates infidividual datat fraems for each heart strip! very cool 
+
+muscle.lm.modelled<- muscle_nested %>% mutate(model=map(data,~ lm(Length~ Conc, data=.x)), augmented= map(model, augment)) %>% unnest(augmented) 
+
+muscle.lm.modelled
+
+muscle.lm.modelled %>% ggplot(aes(Conc, Length,colour=Strip)) + geom_jitter() + geom_line(aes(y=.fitted)) 
+```
+
+This is great, but we have plotted one regression line for each heart strip, how can we tell that these heart strips are completely independnet from each other? AFter all arent all these heart strips coming from a similar heart if not the same? This is where linear mixed effects come in and allow for us to include these effects so that eah heart strip's regression line can also be innfluenced by the regresision line of other heart strips. Lets attemtpt the first mixed model with random intercepts only: 
+
+```{r}
+muscle.lmer<- lmer(Length~ Conc+ (1|Strip), data=muscle)
+summary(muscle.lmer)
+muscle.lmer.modelled<-muscle.lmer %>% augment()
+ggplot(muscle.lmer.modelled,aes(Conc,Length,colour=Strip))+ geom_point() + geom_line(aes(y=.fitted))
+```
+The above model has allowed us to achieve random intercepts for each heart strip.We see from this that different heart strips seem to react differently to different concentrations. Including random interceps allows us to see the deviations of each strip from the fixed intercept. This is good so far, but isn't is likely that each concentration unit has a different interaction with each heart strip and vice versa even (an interaction effect). We can run the following model to build random slopes to account for this:
+
+
+```{r}
+muscle.ind.lmer<- lmer(Length~ Conc+ (1+ Conc|Strip) , data=muscle)
+summary(muscle.ind.lmer)
+muscle.ind.lmer.modelled<-muscle.ind.lmer %>% augment()
+ggplot(muscle.ind.lmer.modelled,aes(Conc,Length,colour=Strip))+ geom_point() + geom_line(aes(y=.fitted)) +ylab(label="change in length of heart tissue strip (mm)") +xlab(label="concentration of calcium chloride solution") + ggtitle("Effect of Calcium Chloride on Muscle Contraction in Rat Hearts") + theme_minimal()
+```
+We may wonder what the difference is between this model and the second previous one, the differece is that in ths model, the regression line for each strip is being influcneced and "pooled" towards the mean regressioon line after consideration of the pioetantial radom interaction between conc and strip. In the second previous plot, we build different slopes yes but these slopes weere not influemced by their "neighbours" or interaction effects between strip and conce per se, hence they were relatively independnet from each other such thaat we were simply plotting one regression line for each strip, but as we have established, how can they be vastly indoepenedte from ieach otehr consideirng that they're all heart muscles. The good part about this is that that if any heart strip showed  a great outlier or had missing/imcomplete data, we cna still identify a general trend based on its neighbours and the genral interaction between concentration and heart strips in relation to length.
+
+Here is a key to remember lme terms: 
+
+1) random intercepts: the deviation of regression lines from fixed intercepts 
+2)random slopes: the "steepness" in change within interactions between different variables such as strip and conc. within the lme framework, building random slopes will result in pooling of data towards the general trend
